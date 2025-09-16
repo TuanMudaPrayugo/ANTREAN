@@ -61,7 +61,7 @@ If you discover a security vulnerability within Laravel, please send an e-mail t
 The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
 
 Setting.
-# ANTREAN
+## ANTREAN
 
 Aplikasi Laravel untuk manajemen antrian dan layanan.
 
@@ -122,7 +122,7 @@ npm run dev
     php artisan migrate
 
 
-🤖 AI & NLP Integration (Opsional)
+## AI & NLP Integration (Opsional)
 1. Install Ollama
 Jalankan perintah berikut untuk install Ollama di Windows:
     winget install Ollama.Ollama
@@ -142,7 +142,7 @@ Jalankan perintah berikut untuk install Ollama di Windows:
 6. Konfigurasi .env
 Tambahkan di file .env:
 
-# LLM lokal (Ollama)
+## LLM lokal (Ollama)
 LLM_ENDPOINT=http://127.0.0.1:11434/api/chat
 LLM_MODEL=qwen2:1.5b-instruct
 USE_LLM=true
