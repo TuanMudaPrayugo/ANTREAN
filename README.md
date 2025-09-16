@@ -163,7 +163,8 @@ Tambahkan di file .env:
 LLM_ENDPOINT=http://127.0.0.1:11434/api/chat
 LLM_MODEL=qwen2:1.5b-instruct
 USE_LLM=true
+---
 
-## Penutup
+## lasy
 Dengan ini aplikasi Laravel kamu bisa menghubungkan fitur Chat AI ke Ollama lokal.
 Sastrawi bisa dipakai untuk stemming/analisis teks bahasa Indonesia sebelum/atau setelah diproses oleh LLM.
