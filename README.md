@@ -85,23 +85,32 @@ Aplikasi Laravel untuk manajemen antrian dan layanan.
    cd ANTREAN
 
 2. Install dependencies:
+    
+    ```bash
     composer install
+
+    ```bash
     npm install
     
 3. Copy .env.example ke .env:
+    ```bash
     cp .env.example .env
     lalu sesuaikan isi .env.
 
 4. Generate key Laravel:
+    ```bash
     php artisan key:generate
 
 5. Migrasi database:
+    ```bash
     php artisan migrate
 
 Jalankan server:
+    ```bash
     php artisan serve
 
 Compile asset frontend:
+```bash
 npm run dev
 
 🗄️ Setup Database MySQL
