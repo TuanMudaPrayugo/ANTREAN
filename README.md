@@ -92,20 +92,20 @@ Aplikasi Laravel untuk manajemen antrian dan layanan.
     ```bash
     npm install
     
-3. Copy .env.example ke .env>>lalu sesuaikan isi .env.: 
+4. Copy .env.example ke .env>>lalu sesuaikan isi .env.: 
     ```bash
     cp .env.example .env
     
 
-4. Generate key Laravel:
+5. Generate key Laravel:
     ```bash
     php artisan key:generate
 
-5. Migrasi database:
+6. Migrasi database:
     ```bash
     php artisan migrate
 
-Jalankan server:
+7. Jalankan server:
     ```bash
     php artisan serve
     
