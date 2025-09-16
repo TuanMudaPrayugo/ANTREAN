@@ -88,7 +88,7 @@ Aplikasi Laravel untuk manajemen antrian dan layanan.
     ```bash
     composer install
 
-install npm :
+3. install npm :
     ```bash
     npm install
     
