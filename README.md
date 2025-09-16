@@ -165,6 +165,12 @@ LLM_MODEL=qwen2:1.5b-instruct
 USE_LLM=true
 ---
 
+
+## AI & NLP Integration (Opsional)
+1. Install Ollama
+    Jalankan perintah berikut untuk install Ollama di Windows:
+     ```bash
+    winget install Ollama.Ollama
 ## lasy
 Dengan ini aplikasi Laravel kamu bisa menghubungkan fitur Chat AI ke Ollama lokal.
 Sastrawi bisa dipakai untuk stemming/analisis teks bahasa Indonesia sebelum/atau setelah diproses oleh LLM.
