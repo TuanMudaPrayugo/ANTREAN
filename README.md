@@ -159,19 +159,13 @@ Aplikasi Laravel untuk manajemen antrian dan layanan.
 Tambahkan di file .env:
 
 ## LLM lokal (Ollama)
- ```env
-LLM_ENDPOINT=http://127.0.0.1:11434/api/chat
-LLM_MODEL=qwen2:1.5b-instruct
-USE_LLM=true
----
+    ```env
+    LLM_ENDPOINT=http://127.0.0.1:11434/api/chat
+    LLM_MODEL=qwen2:1.5b-instruct
+    USE_LLM=true
+    ---
 
 
 
-
-## lasy
 Dengan ini aplikasi Laravel kamu bisa menghubungkan fitur Chat AI ke Ollama lokal.
 Sastrawi bisa dipakai untuk stemming/analisis teks bahasa Indonesia sebelum/atau setelah diproses oleh LLM.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
