@@ -89,7 +89,7 @@ Aplikasi Laravel untuk manajemen antrian dan layanan.
     ```bash
     composer install
 
-    ```bash
+    
     npm install
     
 3. Copy .env.example ke .env:
