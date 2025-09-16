@@ -50,16 +50,17 @@ $createdAt = $tiket->created_at ? $tiket->created_at->copy()->timezone('Asia/Jak
               <div class="alert alert-info mb-3">{{ session('toast') }}</div>
             @endif
 
-            @if (!empty($joinUrl) && $tiket->status === 'running')
-              <div class="alert alert-secondary mt-1 text-start">
-                <div><strong>Buka di browser lain di perangkat ini?</strong></div>
-                <div class="mt-1">Masukkan PIN: <span class="fs-5 fw-bold">{{ $tiket->join_pin }}</span></div>
-                <div class="input-group mt-2">
-                  <input type="text" class="form-control" id="joinLinkInput" value="{{ $joinUrl }}" readonly>
-                  <button class="btn btn-outline-primary" type="button" id="btnCopyJoin">Copy Link</button>
-                </div>
-              </div>
-            @endif
+                    @if (!empty($joinUrl) && $tiket->status === 'running') 
+                    <div class="alert alert-secondary mt-1 text-start"> 
+                      <div><strong>Buka di browser lain di perangkat ini?</strong></div> 
+                    <div class="mt-1">Masukkan PIN: 
+                      <span class="fs-5 fw-bold">{{ $tiket->join_pin }}</span></div> 
+                    <div class="input-group mt-2"> 
+                      <input type="text" class="form-control" id="joinLinkInput" value="{{ $joinUrl }}" readonly> 
+                      <button class="btn btn-outline-primary" type="button" id="btnCopyJoin">Copy Link</button> 
+                    </div> 
+                  </div> 
+                  @endif
 
             {{-- Banner DONE --}}
             <div id="doneBanner" class="alert alert-primary mt-3 d-none text-start">

@@ -114,7 +114,7 @@ Route::middleware(['web', NoCache::class])->group(function () {
     Route::get('/tiket/{ticket}/timeline/data',   [TimelineController::class,'data'])->name('timeline.data');
 
     // Magic link + PIN
-    Route::get('/join/{ticket}',          [TimelineController::class,'joinForm'])->name('timeline.join')->middleware('signed');
+    Route::get('/join/{ticket}',          [TimelineController::class,'joinForm'])->name('timeline.join')->middleware('signed:relative');
     Route::post('/join/{ticket}',         [TimelineController::class,'joinVerify'])->name('timeline.join.verify')->middleware('signed');
 
     // Petugas
