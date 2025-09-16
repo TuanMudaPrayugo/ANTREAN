@@ -85,11 +85,10 @@ Aplikasi Laravel untuk manajemen antrian dan layanan.
    cd ANTREAN
 
 2. Install dependencies:
-    
     ```bash
     composer install
 
-    
+install npm :
     npm install
     
 3. Copy .env.example ke .env:
