@@ -109,17 +109,18 @@ Aplikasi Laravel untuk manajemen antrian dan layanan.
     ```bash
     php artisan serve
     
-Compile asset frontend:
-
-npm run dev
+8 Compile asset frontend:
+    ```bash
+    npm run dev
 
 🗄️ Setup Database MySQL
 1. Buat database baru:
     sql
-
+     ```sql
     CREATE DATABASE antrean CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 2. Edit .env:
+     ```env
     DB_CONNECTION=mysql
     DB_HOST=127.0.0.1
     DB_PORT=3306
@@ -128,30 +129,37 @@ npm run dev
     DB_PASSWORD=
 
 3. Migrasi:
+     ```bash
     php artisan migrate
 
 
 ## AI & NLP Integration (Opsional)
 1. Install Ollama
-Jalankan perintah berikut untuk install Ollama di Windows:
+    Jalankan perintah berikut untuk install Ollama di Windows:
+     ```bash
     winget install Ollama.Ollama
 
 2. Pull model Qwen2
+     ```bash
     ollama pull qwen2:1.5b-instruct
 
 3. Menjalankan Ollama
+     ```bash
     ollama run qwen2:1.5b-instruct
 
 4. Test API Ollama
+     ```bash
     curl http://127.0.0.1:11434/api/tags
 
 5. Install NLP Bahasa Indonesia (Sastrawi)
+     ```bash
     composer require sastrawi/sastrawi
 
 6. Konfigurasi .env
 Tambahkan di file .env:
 
 ## LLM lokal (Ollama)
+ ```env
 LLM_ENDPOINT=http://127.0.0.1:11434/api/chat
 LLM_MODEL=qwen2:1.5b-instruct
 USE_LLM=true
