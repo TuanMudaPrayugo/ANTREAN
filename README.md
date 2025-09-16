@@ -56,11 +56,11 @@ In order to ensure that the Laravel community is welcoming to all, please review
 
 If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed. -->
 
-## License
+<!-- ## License
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT). -->
 
-Setting.
+
 ## ANTREAN
 
 Aplikasi Laravel untuk manajemen antrian dan layanan.
@@ -164,5 +164,6 @@ LLM_ENDPOINT=http://127.0.0.1:11434/api/chat
 LLM_MODEL=qwen2:1.5b-instruct
 USE_LLM=true
 
+## Penutup
 Dengan ini aplikasi Laravel kamu bisa menghubungkan fitur Chat AI ke Ollama lokal.
 Sastrawi bisa dipakai untuk stemming/analisis teks bahasa Indonesia sebelum/atau setelah diproses oleh LLM.
