@@ -89,12 +89,13 @@ Aplikasi Laravel untuk manajemen antrian dan layanan.
     composer install
 
 install npm :
+    ```bash
     npm install
     
-3. Copy .env.example ke .env:
+3. Copy .env.example ke .env>>lalu sesuaikan isi .env.: 
     ```bash
     cp .env.example .env
-    lalu sesuaikan isi .env.
+    
 
 4. Generate key Laravel:
     ```bash
@@ -107,9 +108,9 @@ install npm :
 Jalankan server:
     ```bash
     php artisan serve
-
+    
 Compile asset frontend:
-```bash
+
 npm run dev
 
 🗄️ Setup Database MySQL
