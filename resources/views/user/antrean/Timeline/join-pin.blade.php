@@ -18,10 +18,11 @@
 
         <form method="POST" action="{{ route('timeline.join.verify', $ticket->id) }}">
           @csrf
+          <input type="hidden" name="fp" id="fp">
           <div class="mb-3">
             <label class="form-label">PIN</label>
             <input type="text" name="pin" class="form-control" inputmode="numeric" maxlength="6"
-                   placeholder="4 digit" required value="{{ old('pin') }}">
+                  placeholder="4 digit" required value="{{ old('pin') }}">
           </div>
           <div class="d-grid">
             <button type="submit" class="btn btn-primary">Verifikasi & Lanjut</button>
@@ -35,4 +36,25 @@
     </div>
   </div>
 </div>
+
+<script>
+(async function(){
+  const plat  = navigator.userAgentData?.platform || navigator.platform || '';
+  const cores = navigator.hardwareConcurrency || 0;
+  const mem   = navigator.deviceMemory || 0;
+  const w     = screen.width, h = screen.height, dpr = window.devicePixelRatio || 1;
+
+  const raw = [plat, cores, mem, w, h, dpr].join('|');
+
+  async function sha256(s){
+    const enc = new TextEncoder().encode(s);
+    const buf = await crypto.subtle.digest('SHA-256', enc);
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }
+
+  document.getElementById('fp').value = await sha256(raw);
+})();
+</script>
+
+
 @endsection

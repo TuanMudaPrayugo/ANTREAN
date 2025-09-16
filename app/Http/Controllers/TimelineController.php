@@ -2,11 +2,12 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\KStep;
-use App\Models\Progress;
-use App\Models\Ticket;
 use Carbon\Carbon;
+use App\Models\KStep;
+use App\Models\Ticket;
+use App\Models\Progress;
 use Carbon\CarbonInterface;
+use Illuminate\Support\Str;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
@@ -22,10 +23,17 @@ class TimelineController extends Controller
 
         // Magic link hanya saat running
         $joinUrl = null;
-        if ($tiket->status === 'running') {
-            $expiresAt = now()->addMinutes(45);
-            $joinUrl = URL::temporarySignedRoute('timeline.join', $expiresAt, ['ticket' => $tiket->id]);
-        }
+if ($tiket->status === 'running') {
+    // (opsional) hanya buat token baru jika kosong atau sudah kedaluwarsa
+    if (empty($tiket->join_token) || empty($tiket->join_token_expires_at) || now()->greaterThan($tiket->join_token_expires_at)) {
+        $tiket->join_token = Str::random(48);
+    }
+    $tiket->join_token_expires_at = now()->addMinutes(45);
+    $tiket->save();
+
+    // Link biasa (stabil di domain apa pun)
+    $joinUrl = route('timeline.join', ['ticket' => $tiket->id, 't' => $tiket->join_token]);
+}
 
         $tiket->load(['layanan','progresses.issues','progresses.issue']);
         $layanan  = $tiket->layanan;
@@ -43,28 +51,59 @@ class TimelineController extends Controller
     }
 
     public function joinForm(Request $request, Ticket $ticket)
-    {
-        if ($ticket->status !== 'running') {
-            return redirect()->route('antrean.index')->withErrors(['msg' => 'Tiket sudah tidak aktif.']);
-        }
-        return view('user/antrean/Timeline/join-pin', ['ticket' => $ticket]);
+{
+    $t = (string) $request->query('t', '');
+    if ($t === '' || $t !== (string) $ticket->join_token) {
+        abort(403, 'Invalid token');
+    }
+    if (empty($ticket->join_token_expires_at) || now()->greaterThan($ticket->join_token_expires_at)) {
+        abort(403, 'Token expired');
     }
 
-    public function joinVerify(Request $request, Ticket $ticket)
-    {
-        if ($ticket->status !== 'running') {
-            return redirect()->route('antrean.index')->withErrors(['msg' => 'Tiket sudah tidak aktif.']);
-        }
-        $request->validate(['pin' => 'required|string']);
-        if ($request->input('pin') !== (string)$ticket->join_pin) {
-            return back()->withErrors(['msg' => 'PIN salah.'])->withInput();
-        }
-        session(['active_ticket_id' => $ticket->id]);
-        $cookie = cookie()->forever("paired_ticket_{$ticket->id}", 1);
-        return redirect()->route('timeline.show', $ticket->id)
-            ->with('toast', 'Tiket aktif telah dikaitkan ke browser ini.')
-            ->withCookie($cookie);
+    if ($ticket->status !== 'running') {
+        return redirect()->route('antrean.index')->withErrors(['msg' => 'Tiket sudah tidak aktif.']);
     }
+
+    return view('user/antrean/Timeline/join-pin', ['ticket' => $ticket]);
+}
+
+    public function joinVerify(Request $request, Ticket $ticket)
+{
+    if ($ticket->status !== 'running') {
+        return redirect()->route('antrean.index')->withErrors(['msg' => 'Tiket sudah tidak aktif.']);
+    }
+
+    // cek PIN
+    $request->validate(['pin' => 'required|string']);
+    if ($request->input('pin') !== (string)$ticket->join_pin) {
+        return back()->withErrors(['msg' => 'PIN salah.'])->withInput();
+    }
+
+    // cek fingerprint perangkat
+    $reqFp = (string) $request->input('fp', '');
+    if (!empty($ticket->origin_fp) && $reqFp !== $ticket->origin_fp) {
+        return back()->withErrors(['msg' => 'Hanya bisa dibuka di perangkat yang sama.'])->withInput();
+    }
+
+    session(['active_ticket_id' => $ticket->id]);
+    $cookie = cookie()->forever("paired_ticket_{$ticket->id}", 1);
+
+    return redirect()->route('timeline.show', $ticket->id)
+        ->with('toast', 'Tiket aktif telah dikaitkan ke browser ini.')
+        ->withCookie($cookie);
+}
+
+public function storeFingerprint(Request $request, Ticket $ticket)
+{
+    $request->validate(['fp' => 'required|string|min:20']);
+    $ticket->origin_fp = substr($request->fp, 0, 128);
+    if (empty($ticket->origin_ip)) {
+        $ticket->origin_ip = $request->ip();
+    }
+    $ticket->save();
+
+    return response()->noContent();
+}
 
     public function data(Ticket $ticket, Request $request)
 {

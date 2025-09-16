@@ -213,6 +213,37 @@ $createdAt = $tiket->created_at ? $tiket->created_at->copy()->timezone('Asia/Jak
   .alert-user-issues .issue-chip{color:#991b1b; border-color:#fecaca;}
 </style>
 
+{{-- ======== untuk proses copy link ============ --}}
+@if (!empty($joinUrl) && $tiket->status === 'running')
+<script>
+(async function(){
+  const plat  = navigator.userAgentData?.platform || navigator.platform || '';
+  const cores = navigator.hardwareConcurrency || 0;
+  const mem   = navigator.deviceMemory || 0;
+  const w     = screen.width, h = screen.height, dpr = window.devicePixelRatio || 1;
+
+  const raw = [plat, cores, mem, w, h, dpr].join('|');
+
+  async function sha256(s){
+    const enc = new TextEncoder().encode(s);
+    const buf = await crypto.subtle.digest('SHA-256', enc);
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }
+
+  const fp = await sha256(raw);
+
+  fetch("{{ route('timeline.store-fp', ['ticket'=>$tiket->id]) }}", {
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-CSRF-TOKEN':'{{ csrf_token() }}'},
+    body: JSON.stringify({ fp })
+  });
+})();
+</script>
+@endif
+{{-- ============ end ====================== --}}
+
+
+
 <script>
 (function(){
   /* ========= helpers ========= */
