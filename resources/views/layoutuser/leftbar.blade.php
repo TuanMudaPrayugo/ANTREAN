@@ -38,11 +38,11 @@
                         </ul><!--end nav-->
                     </div><!--end /div-->
                 </div><!--end main-icon-menu-body-->
-                <div class="pro-metrica-end">
+                {{-- <div class="pro-metrica-end">
                     <a href="" class="profile">
                         <img src="{{asset('metrica/dist/assets/images/users/user-4.jpg')}}" alt="profile-user" class="rounded-circle thumb-sm">
                     </a>
-                </div><!--end pro-metrica-end-->
+                </div><!--end pro-metrica-end--> --}}
             </div>
             <!--end main-icon-menu-->
 

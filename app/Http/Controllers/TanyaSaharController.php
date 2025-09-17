@@ -26,24 +26,31 @@ class TanyaSaharController extends Controller
 {
     try {
         $q = trim((string) $request->input('q', ''));
-        $tokens = Nlp::tokens($q); // sudah dinamis (alias & koreksi dari Nlp)
+        $tokens = \App\Support\Nlp::tokens($q); // tokenizer dinamis (alias & koreksi)
 
-        // Input kosong → rekomendasi populer
+        // 0) Input kosong → kirim rekomendasi populer
         if ($q === '' || empty($tokens)) {
+            $alts = $this->suggestIssues([], 6, null);
             return response()->json([
                 'title'        => null,
                 'answer'       => '',
                 'issue_id'     => null,
-                'alternatives' => $this->suggestIssues([], 6),
+                'alternatives' => $alts,
                 'ask_feedback' => false,
             ], 200);
         }
 
-        /* ========= 1) Deterministik (exact/anchor coverage) ========= */
+        /* ========= 1) Deterministik (exact/alias) ========= */
         if ($hit = \App\Services\KIssueMatcher::exact($q)) {
             $related = $this->relatedFromResults($q, collect([$hit]), 5);
-            $raw     = (string) ($hit->solusion ?? '');
-            $nice    = $llm->polish($q, $raw);
+            // BACKUP jika related kosong
+            if (empty($related)) {
+                $related = $this->suggestIssues($tokens, 5, null);
+                $related = $this->filterTopicSafeTitles($related, $tokens);
+            }
+
+            $raw  = (string) ($hit->solusion ?? '');
+            $nice = $llm->polish($q, $raw);
 
             return response()->json([
                 'title'        => $hit->issue_name,
@@ -55,44 +62,39 @@ class TanyaSaharController extends Controller
         }
 
         /* ========= 2) SmartSearch + Guard ========= */
-        $results = KIssue::smartSearch($q, 10);
+        $results = \App\Models\KIssue::smartSearch($q, 10);
 
         if ($results->isNotEmpty()) {
-            // pilih beberapa anchor paling informatif (DF terkecil)
+            // 2.a pilih beberapa anchor paling informatif (DF terkecil)
             $anchors = $this->pickAnchorsForQuery($tokens);
 
-            // pilih kandidat teratas yang mengandung SEMUA anchor
-            $top = $this->chooseAnchoredTop($results, $anchors);
+            // 2.b pilih kandidat teratas yang memuat SEMUA anchor
+            $top = $this->chooseAnchoredTop($results, $anchors, $tokens);
 
             if ($top) {
                 $ok = $this->isConfidentMatch($tokens, $top, $results);
 
-                // 🔒 Guard tambahan: token penting harus muncul pada kandidat
+                // 2.c Guard tambahan: token penting (anchor + token panjang) harus ada di kandidat
                 $haystack = \Illuminate\Support\Str::lower(
                     ($top->issue_name ?? '') . ' ' . ($top->solusion ?? '')
                 );
-
-                // token penting = anchor + token kueri panjang (≥5)
                 $mustTokens = $anchors;
-                foreach ($tokens as $t) {
-                    if (mb_strlen($t) >= 5) $mustTokens[] = $t;
-                }
+                foreach ($tokens as $t) if (mb_strlen($t) >= 5) $mustTokens[] = $t;
                 $mustTokens = array_values(array_unique($mustTokens));
 
                 foreach ($mustTokens as $t) {
                     if (!\Illuminate\Support\Str::contains($haystack, $t)) {
-                        $ok = false; // jika SATU token penting tidak ada → jangan paksa
-                        break;
+                        $ok = false; break;
                     }
                 }
 
                 if ($ok) {
-                    // related: ambil dari pool selain top dan tetap menjaga anchor
-                    $relatedPool = $results->reject(fn($r)=>$r->id === $top->id)->values();
+                    // 2.d siapkan related dari pool selain top dan tetap jaga anchor
+                    $relatedPool = $results->reject(fn ($r) => $r->id === $top->id)->values();
                     if (!empty($anchors)) {
-                        $relatedPool = $relatedPool->filter(function($r) use ($anchors){
+                        $relatedPool = $relatedPool->filter(function ($r) use ($anchors) {
                             $hay = \Illuminate\Support\Str::lower(
-                                ($r->issue_name ?? '').' '.($r->solusion ?? '')
+                                ($r->issue_name ?? '') . ' ' . ($r->solusion ?? '')
                             );
                             foreach ($anchors as $a) {
                                 if (!\Illuminate\Support\Str::contains($hay, $a)) return false;
@@ -102,8 +104,14 @@ class TanyaSaharController extends Controller
                     }
 
                     $related = $this->relatedFromResults($q, $relatedPool, 5);
-                    $raw     = (string) ($top->solusion ?? '');
-                    $nice    = $llm->polish($q, $raw); // LLM safe-polish
+                    // BACKUP related jika kosong
+                    if (empty($related)) {
+                        $related = $this->suggestIssues($tokens, 5, null);
+                        $related = $this->filterTopicSafeTitles($related, $tokens);
+                    }
+
+                    $raw  = (string) ($top->solusion ?? '');
+                    $nice = $llm->polish($q, $raw);
 
                     return response()->json([
                         'title'        => $top->issue_name,
@@ -116,30 +124,97 @@ class TanyaSaharController extends Controller
             }
         }
 
-        /* ========= 3) Fallback: tidak ada hasil yang cukup ========= */
+        /* ========= 2b) Soft title cover (judul mencakup ≥80% token kueri) ========= */
+        $soft = \App\Models\KIssue::tokenSearch($q, 20);
+        if ($soft->isNotEmpty()) {
+            $best = null; $bestCov = 0.0; $qT = \App\Support\Nlp::tokens($q);
+
+            foreach ($soft as $r) {
+                $tT = \App\Support\Nlp::tokens($r->issue_name ?? '');
+                $inter = count(array_intersect($qT, $tT));
+                $cov   = $inter / max(1, count($qT));
+                if ($cov > $bestCov) { $bestCov = $cov; $best = $r; }
+            }
+
+            if ($best && $bestCov >= 0.80) {
+                $related = $this->relatedFromResults($q, $soft->reject(fn ($x) => $x->id === $best->id), 5);
+                // BACKUP related jika kosong
+                if (empty($related)) {
+                    $related = $this->suggestIssues($qT, 5, null);
+                    $related = $this->filterTopicSafeTitles($related, $qT);
+                }
+
+                $raw  = (string) ($best->solusion ?? '');
+                $nice = $llm->polish($q, $raw);
+
+                return response()->json([
+                    'title'        => $best->issue_name,
+                    'answer'       => $nice,
+                    'issue_id'     => $best->id,
+                    'alternatives' => $related,
+                    'ask_feedback' => true,
+                ], 200);
+            }
+        }
+
+        /* ========= 3) Fallback (tidak ada hasil yang cukup) ========= */
+        $alts = $this->suggestIssues($tokens, 6, null);
+        $alts = $this->filterTopicSafeTitles($alts, $tokens);
+        // BACKOFF: kalau setelah filter kosong, tetap kirim saran mentah
+        if (empty($alts)) $alts = $this->suggestIssues($tokens, 6, null);
+
         return response()->json([
             'title'        => null,
             'answer'       => '',
             'issue_id'     => null,
-            'alternatives' => $this->suggestIssues($tokens, 6, $results ?? null),
+            'alternatives' => $alts,
             'ask_feedback' => false,
         ], 200);
 
     } catch (\Throwable $e) {
-        Log::error('ASK failed', [
+        \Illuminate\Support\Facades\Log::error('ASK failed', [
             'q'     => $request->input('q'),
             'error' => $e->getMessage(),
         ]);
 
-        $tokens = Nlp::tokens((string) $request->input('q', ''));
+        $tokens = \App\Support\Nlp::tokens((string) $request->input('q', ''));
+        $alts   = $this->suggestIssues($tokens, 6, null);
+
         return response()->json([
             'title'        => null,
             'answer'       => '',
             'issue_id'     => null,
-            'alternatives' => $this->suggestIssues($tokens, 6),
+            'alternatives' => $alts,
             'ask_feedback' => false,
         ], 200);
     }
+}
+
+
+protected function filterTopicSafeTitles(array $titles, array $qTokens): array
+{
+    if (empty($titles)) return [];
+    $df   = \App\Support\Nlp::df();
+    $qSet = array_flip($qTokens);
+
+    $safe = [];
+    foreach ($titles as $title) {
+        $titleTokens = \App\Support\Nlp::tokens($title);
+        $cand = [];
+        foreach ($titleTokens as $t) if (isset($df[$t])) $cand[$t] = $df[$t];
+        if (empty($cand)) { $safe[] = $title; continue; }
+
+        asort($cand); // DF kecil = lebih spesifik
+        $titleAnchors = array_slice(array_keys($cand), 0, 2);
+
+        $hasNewSpecific = false;
+        foreach ($titleAnchors as $t) {
+            if (!isset($qSet[$t])) { $hasNewSpecific = true; break; }
+        }
+        if (!$hasNewSpecific) $safe[] = $title;
+    }
+
+    return array_values(array_unique($safe));
 }
 
 /* ===================== Helper baru ===================== */
@@ -166,23 +241,41 @@ protected function pickAnchorsForQuery(array $qTokens): array
  * Dari hasil smartSearch, pilih kandidat teratas yang memuat SEMUA anchor.
  * Jika tidak ada yang memenuhi, kembalikan null (agar jatuh ke fallback).
  */
-protected function chooseAnchoredTop($results, array $anchors)
+protected function chooseAnchoredTop($results, array $anchors, array $qTokens = [])
 {
-    if (empty($anchors)) {
-        return $results->first(); // tanpa anchor, pakai skor tertinggi
-    }
+    if (empty($results)) return null;
+
+    $qSet = array_flip($qTokens);
+    $df   = \App\Support\Nlp::df();
 
     foreach ($results as $r) {
-        $hay = \Illuminate\Support\Str::lower(
-            ($r->issue_name ?? '') . ' ' . ($r->solusion ?? '')
-        );
+        $title = \Illuminate\Support\Str::lower($r->issue_name ?? '');
+        $hay   = \Illuminate\Support\Str::lower(($r->issue_name ?? '') . ' ' . ($r->solusion ?? ''));
+
+        // 1) wajib mengandung semua anchor dari query
         $ok = true;
         foreach ($anchors as $a) {
             if (!\Illuminate\Support\Str::contains($hay, $a)) { $ok = false; break; }
         }
-        if ($ok) return $r;
+        if (!$ok) continue;
+
+        // 2) 🔒 tolak jika judul membawa token spesifik (DF rendah) yang tak ada di query
+        $titleTokens = \App\Support\Nlp::tokens($title);
+        $cand = [];
+        foreach ($titleTokens as $t) if (isset($df[$t])) $cand[$t] = $df[$t];
+        asort($cand); // DF terkecil = paling spesifik
+        $titleAnchors = array_slice(array_keys($cand), 0, 2);
+
+        $hasNewSpecific = false;
+        foreach ($titleAnchors as $t) {
+            if (!isset($qSet[$t])) { $hasNewSpecific = true; break; }
+        }
+        if ($hasNewSpecific) continue;
+
+        return $r;
     }
-    return null; // tidak ada kandidat yang mengandung semua anchor
+
+    return null;
 }
 
 
@@ -213,91 +306,121 @@ protected function chooseAnchoredTop($results, array $anchors)
     /* ===================== Helpers ===================== */
 
     protected function isConfidentMatch(array $qTokens, $top, $results): bool
-    {
-        $hayTokens = Nlp::tokens(($top->issue_name ?? '') . ' ' . ($top->solusion ?? ''));
-        $inter     = count(array_intersect($qTokens, $hayTokens));
-        $union     = count(array_unique(array_merge($qTokens, $hayTokens))) ?: 1;
-        $jacc      = $inter / $union;
+{
+    $hayTokens = \App\Support\Nlp::tokens(($top->issue_name ?? '') . ' ' . ($top->solusion ?? ''));
+    $inter     = count(array_intersect($qTokens, $hayTokens));
+    $union     = count(array_unique(array_merge($qTokens, $hayTokens))) ?: 1;
+    $jacc      = $inter / $union;
 
-        $s1    = (float) ($top->score ?? 0.0);
-        $s2obj = optional($results->skip(1)->first());
-        $s2    = (float) ($s2obj->score ?? 0.0);
-        $gap   = $s1 - $s2;
-        $ratio = $s2 > 0 ? $s1 / max($s2, 1e-9) : 2.0;
+    $s1    = (float) ($top->score ?? 0.0);
+    $s2obj = optional($results->skip(1)->first());
+    $s2    = (float) ($s2obj->score ?? 0.0);
+    $gap   = $s1 - $s2;
+    $ratio = $s2 > 0 ? $s1 / max($s2, 1e-9) : 2.0;
 
-        // default threshold
-        $need = min(0.55, max(0.20, 0.12 + 0.05 * count($qTokens)));
+    $need = min(0.55, max(0.20, 0.12 + 0.05 * count($qTokens)));
 
-        // pelunak untuk kueri pendek atau anchor match
-        $anchor    = Nlp::pickAnchor($qTokens);
-        $haystack  = Str::lower(($top->issue_name ?? '') . ' ' . ($top->solusion ?? ''));
-        $anchorHit = $anchor && Str::contains($haystack, $anchor);
-
-        if (count($qTokens) <= 2 || $anchorHit) {
-            return ($jacc >= 0.18) || ($ratio >= 1.20) || ($gap >= 0.12);
+    // === Tambahkan guard penting ===
+    $mustTokens = [];
+    foreach ($qTokens as $t) {
+        if (in_array($t, ['alamat','mutasi','pindah'])) {
+            $mustTokens[] = $t;
         }
-
-        return ($jacc >= $need) || ($ratio >= 1.35) || ($gap >= 0.18);
     }
+    foreach ($mustTokens as $t) {
+        if (!in_array($t, $hayTokens)) {
+            return false; // kandidat tolak kalau token penting tidak ada
+        }
+    }
+
+    $anchor    = \App\Support\Nlp::pickAnchor($qTokens);
+    $haystack  = \Illuminate\Support\Str::lower(($top->issue_name ?? '') . ' ' . ($top->solusion ?? ''));
+    $anchorHit = $anchor && \Illuminate\Support\Str::contains($haystack, $anchor);
+
+    if (count($qTokens) <= 2 || $anchorHit) {
+        return ($jacc >= 0.18) || ($ratio >= 1.20) || ($gap >= 0.12);
+    }
+
+    return ($jacc >= $need) || ($ratio >= 1.35) || ($gap >= 0.18);
+}
+
 
     protected function relatedFromResults(string $q, $cands, int $take = 5): array
-    {
-        $asked = collect(Nlp::tokens($q));
+{
+    $asked = collect(\App\Support\Nlp::tokens($q));
 
-        $cand = collect($cands)->map(function ($r) use ($asked) {
-            $t = collect(Nlp::tokens($r->issue_name))->unique()->values()->all();
-            $inter = count(array_intersect($asked->all(), $t));
-            $union = count(array_unique(array_merge($asked->all(), $t))) ?: 1;
-            $sim   = $inter / $union;
-            return ['title' => $r->issue_name, 'sim' => $sim];
-        });
+    $cand = collect($cands)->map(function ($r) use ($asked) {
+        $t = collect(\App\Support\Nlp::tokens($r->issue_name))->unique()->values()->all();
+        $inter = count(array_intersect($asked->all(), $t));
+        $union = count(array_unique(array_merge($asked->all(), $t))) ?: 1;
+        $sim   = $inter / $union;
+        return ['title' => $r->issue_name, 'sim' => $sim];
+    });
 
-        if ($cand->isEmpty()) return [];
+    if ($cand->isEmpty()) return [];
 
-        $best   = $cand->max('sim');
-        $median = $cand->median('sim');
-        $cut    = max(0.60 * $best, 0.80 * $median);
+    $best   = $cand->max('sim');
+    $median = $cand->median('sim');
+    $cut    = max(0.60 * $best, 0.80 * $median);
 
-        return $cand->filter(fn ($x) => $x['sim'] >= $cut)
+    $titles0 = $cand->filter(fn ($x) => $x['sim'] >= $cut)
                     ->sortByDesc('sim')
                     ->pluck('title')
-                    ->take($take)
+                    ->take($take * 2)
                     ->values()
                     ->all();
+
+    // 1st pass: saring “setema”
+    $titles = $this->filterTopicSafeTitles($titles0, $asked->all());
+    $titles = array_slice($titles, 0, $take);
+
+    // Fallback jika kosong → pakai versi TIDAK disaring (biar selalu ada)
+    if (empty($titles)) {
+        $titles = array_slice(array_values(array_unique($titles0)), 0, $take);
     }
+
+    return $titles;
+}
+
 
     protected function suggestIssues(array $tokens, int $limit = 6, $results = null): array
-    {
-        // 1) FULLTEXT boolean
-        if (!empty($tokens)) {
-            $bool = collect($tokens)->map(fn ($t) => $t . '*')->implode(' ');
-            $s1 = KIssue::select('issue_name')
-                ->whereRaw("MATCH(issue_name, solusion) AGAINST (? IN BOOLEAN MODE)", [$bool])
-                ->orderByRaw("MATCH(issue_name, solusion) AGAINST (? IN BOOLEAN MODE) DESC", [$bool])
-                ->limit($limit * 2)
-                ->pluck('issue_name')
-                ->unique()
-                ->take($limit)
-                ->values()
-                ->all();
-            if (!empty($s1)) return $s1;
-        }
+{
+    $titles = [];
 
-        // 2) LIKE per token
-        if (!empty($tokens)) {
-            $q = KIssue::query();
-            foreach ($tokens as $t) $q->orWhere('issue_name', 'like', "%{$t}%");
-            $s2 = $q->limit($limit * 2)->pluck('issue_name')->unique()->take($limit)->values()->all();
-            if (!empty($s2)) return $s2;
-        }
-
-        // 3) dari pool hasil awal atau fallback terbaru
-        if ($results && $results->isNotEmpty()) {
-            return $results->pluck('issue_name')->unique()->take($limit)->values()->all();
-        }
-
-        return KIssue::orderByDesc('id')->limit($limit)->pluck('issue_name')->all();
+    // fulltext
+    if (!empty($tokens)) {
+        $bool = collect($tokens)->map(fn ($t) => $t . '*')->implode(' ');
+        $titles = \App\Models\KIssue::select('issue_name')
+            ->whereRaw("MATCH(issue_name, solusion) AGAINST (? IN BOOLEAN MODE)", [$bool])
+            ->orderByRaw("MATCH(issue_name, solusion) AGAINST (? IN BOOLEAN MODE) DESC", [$bool])
+            ->limit($limit * 3)
+            ->pluck('issue_name')->unique()->values()->all();
     }
+
+    // like
+    if (empty($titles) && !empty($tokens)) {
+        $q = \App\Models\KIssue::query();
+        foreach ($tokens as $t) $q->orWhere('issue_name', 'like', "%{$t}%");
+        $titles = $q->limit($limit * 3)->pluck('issue_name')->unique()->values()->all();
+    }
+
+    // terbaru
+    if (empty($titles)) {
+        $titles = \App\Models\KIssue::orderByDesc('id')->limit($limit * 3)->pluck('issue_name')->all();
+    }
+
+    // 1st pass: filter setema
+    $filtered = $this->filterTopicSafeTitles($titles, $tokens);
+    $filtered = array_slice($filtered, 0, $limit);
+
+    // Fallback jika kosong → balik ke daftar awal (tanpa filter) agar tetap ada saran
+    if (empty($filtered)) {
+        $filtered = array_slice(array_values(array_unique($titles)), 0, $limit);
+    }
+
+    return $filtered;
+}
+
 
    
     

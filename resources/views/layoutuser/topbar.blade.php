@@ -13,14 +13,14 @@
                     <li class="dropdown">
                         <a class="nav-link dropdown-toggle nav-user" data-bs-toggle="dropdown" href="#" role="button"
                             aria-haspopup="false" aria-expanded="false">
-                            <div class="d-flex align-items-center">
+                            {{-- <div class="d-flex align-items-center">
                                 <img src="{{asset('metrica/dist/assets/images/users/user-4.jpg')}}" alt="profile-user" class="rounded-circle me-2 thumb-sm" />
                                 <div>
                                     <small class="d-none d-md-block font-11">Admin</small>
                                     <span class="d-none d-md-block fw-semibold font-12">Maria Gibson <i
                                             class="mdi mdi-chevron-down"></i></span>
                                 </div>
-                            </div>
+                            </div> --}}
                         </a>
                         <div class="dropdown-menu dropdown-menu-end">
                             <a class="dropdown-item" href="#"><i class="ti ti-user font-16 me-1 align-text-bottom"></i> Profile</a>

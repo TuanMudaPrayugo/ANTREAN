@@ -173,7 +173,7 @@ class Nlp
             return $w;
         }, $parts);
 
-        return array_values(array_filter($tokens, fn($w)=>mb_strlen($w) >= 2));
+        return array_values(array_filter($tokens, fn($w)=>ctype_digit($w) || mb_strlen($w) >= 2));
     }
 
     /** Tokenizer utama: normalisasi + alias dinamis + koreksi ke vocab */
@@ -202,7 +202,7 @@ class Nlp
             return self::correctToVocab($w);
         }, $parts);
 
-        return array_values(array_filter($tokens, fn($w)=>mb_strlen($w) >= 2));
+        return array_values(array_filter($tokens, fn($w)=>ctype_digit($w) || mb_strlen($w) >= 2));
     }
 
     /* ============================================================

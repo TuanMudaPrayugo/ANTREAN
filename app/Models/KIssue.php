@@ -176,6 +176,25 @@ class KIssue extends Model
                 if ($hasTrouble) $score += 0.08;
             }
 
+            // 🔼 Boost: token query muncul di JUDUL
+            $titleBoost = 0.0;
+            foreach ($qTokens as $qt) {
+                if (Str::contains($title, $qt)) $titleBoost += 0.04;
+            }
+            $score += min($titleBoost, 0.12);
+
+            // 🔻 Penalti: judul memperkenalkan token spesifik (DF rendah) yang tak ada di query
+            $df = Nlp::df();
+            $titleToks = Nlp::tokens($title);
+            $cand = [];
+            foreach ($titleToks as $t) if (isset($df[$t])) $cand[$t] = $df[$t];
+            asort($cand);
+            $rareMiss = 0;
+            foreach (array_slice(array_keys($cand), 0, 2) as $t) {
+                if (!in_array($t, $qTokens, true)) $rareMiss++;
+            }
+            $score -= 0.06 * $rareMiss;
+
             $row->score = $score;
             return $row;
         })->sortByDesc('score')->values();

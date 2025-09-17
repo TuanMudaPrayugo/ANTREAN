@@ -69,6 +69,31 @@ const sendBtn = document.getElementById('send');
 let lastState = { issue_id:null, alternatives:[], user_query:'' };
 let typingNode = null;
 let typingTimer = null;
+//
+// tambahan fungsi baru untuk rekomendasi pertanyaan
+function uniqueTitles(titles){
+  const seen = new Set(), out = [];
+  (titles || []).forEach(t=>{
+    const k = (t||'').trim().toLowerCase();
+    if (!k || seen.has(k)) return;
+    seen.add(k); out.push(t);
+  });
+  return out;
+}
+function buildSuggestionButtons(titles){
+  const wrap = document.createElement('div');
+  wrap.className = 'alternatives';
+  titles.forEach(judul=>{
+    const b = document.createElement('button');
+    b.className = 'alt-btn';
+    b.textContent = judul;
+    b.addEventListener('click', ()=>{ qEl.value = judul; sendBtn.click(); });
+    wrap.appendChild(b);
+  });
+  return wrap;
+}
+function disableFeedback(fbEl){ if (fbEl) fbEl.style.display='none'; }
+
 
 function addUserBubble(text){
   const div = document.createElement('div');
@@ -139,34 +164,31 @@ function addAnswerBubble(payload){
   }
 
   const a = document.createElement('div');
-  a.innerHTML = (answer && answer.trim() !== '') ? nl2br(escapeHtml(answer.trim())) : '<span class="muted">Belum ada hasil yang cocok.</span>';
+  const hasAnswer = !!(answer && answer.trim() !== '');
+  a.innerHTML = hasAnswer
+    ? nl2br(escapeHtml(answer.trim()))
+    : '<span class="muted">Belum ada hasil yang pas. Coba pilih pertanyaan terkait di bawah.</span>';
   box.appendChild(a);
 
-  // simpan state untuk feedback
+  // simpan state mentah dari server (jangan difilter di sini)
   lastState.issue_id = issue_id || null;
   lastState.alternatives = Array.isArray(alternatives) ? alternatives : [];
 
-  // alternatives dari API (judul resmi DB)
-  if (lastState.alternatives.length > 0) {
-    const altWrap = document.createElement('div');
-    altWrap.className = 'alternatives';
-    lastState.alternatives.slice(0, 5).forEach(judul => {
-      const b = document.createElement('button');
-      b.className = 'alt-btn';
-      b.textContent = judul;
-      b.addEventListener('click', ()=> {
-        qEl.value = judul;
-        sendBtn.click();
-      });
-      altWrap.appendChild(b);
-    });
-    box.appendChild(altWrap);
+  // tampilkan saran ringan (boleh difilter sedikit untuk tampilan awal)
+  let altShow = uniqueTitles(lastState.alternatives).slice(0, 5);
+  if (altShow.length > 0) {
+    const head = document.createElement('div');
+    head.className = 'muted';
+    head.style.marginTop = '8px';
+    head.textContent = hasAnswer ? 'Pertanyaan terkait:' : 'Coba pertanyaan berikut:';
+    box.appendChild(head);
+    box.appendChild(buildSuggestionButtons(altShow));
   }
 
-  // feedback
   if (ask_feedback) {
     const fb = document.createElement('div');
     fb.className = 'feedback';
+
     const label = document.createElement('span');
     label.className = 'muted';
     label.textContent = 'Apakah jawaban ini membantu?';
@@ -175,13 +197,14 @@ function addAnswerBubble(payload){
     const y = document.createElement('button');
     y.className = 'btn btn-yes';
     y.textContent = 'Ya';
-    y.addEventListener('click', ()=> sendFeedback(true));
+    y.addEventListener('click', ()=>{ disableFeedback(fb); sendFeedback(true); });
     fb.appendChild(y);
 
     const n = document.createElement('button');
     n.className = 'btn btn-no';
     n.textContent = 'Tidak';
-    n.addEventListener('click', ()=> sendFeedback(false));
+    // PENTING: saat Tidak, kita kirim alternatif MENTAH (tanpa filter ketat)
+    n.addEventListener('click', ()=>{ disableFeedback(fb); sendFeedback(false); });
     fb.appendChild(n);
 
     box.appendChild(fb);
@@ -190,6 +213,7 @@ function addAnswerBubble(payload){
   chatEl.appendChild(box);
   chatEl.scrollTop = chatEl.scrollHeight;
 }
+
 
 function sendFeedback(isHelpful){
   fetch(routes.feedback, {
@@ -206,22 +230,28 @@ function sendFeedback(isHelpful){
     const note = document.createElement('div');
     note.className = 'bubble';
 
-    if (isHelpful || lastState.alternatives.length === 0) {
+    if (isHelpful) {
       note.innerHTML = '<span class="muted">Terima kasih atas tanggapannya.</span>';
       chatEl.appendChild(note);
     } else {
-      // Tampilkan rekomendasi (daftar alternatif) setelah user klik "Tidak"
-      note.innerHTML = '<div class="title">Mungkin yang Anda maksud:</div>';
-      const wrap = document.createElement('div');
-      wrap.className = 'alternatives';
-      lastState.alternatives.slice(0,5).forEach(judul=>{
-        const b = document.createElement('button');
-        b.className = 'alt-btn';
-        b.textContent = judul;
-        b.addEventListener('click', ()=>{ qEl.value = judul; sendBtn.click(); });
-        wrap.appendChild(b);
-      });
-      note.appendChild(wrap);
+      // gunakan alternatives mentah dari server — TANPA filter ketat agar selalu ada
+      const raw = Array.isArray(lastState.alternatives) ? lastState.alternatives : [];
+      const picked = uniqueTitles(raw).slice(0, 5);
+
+      const head = document.createElement('div');
+      head.className = 'title';
+      head.textContent = 'Mungkin yang Anda maksud:';
+      note.appendChild(head);
+
+      if (picked.length > 0) {
+        note.appendChild(buildSuggestionButtons(picked));
+      } else {
+        // benar-benar tidak ada dari server → fallback teks
+        const empty = document.createElement('div');
+        empty.className = 'muted';
+        empty.textContent = 'Coba ketik ulang dengan kata kunci yang lebih spesifik.';
+        note.appendChild(empty);
+      }
       chatEl.appendChild(note);
     }
 
