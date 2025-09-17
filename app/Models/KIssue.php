@@ -211,6 +211,94 @@ class KIssue extends Model
         return $out;
     }
 
+    public static function similarQuestions(string $term, int $limit = 8): array
+{
+    // 1) Token NLP (untuk kasus normal)
+    $tokens = \App\Support\Nlp::tokens($term);
+
+    // 2) Raw words (fallback untuk typo/istilah baru)
+    $rawWords = array_values(array_filter(
+        preg_split('/\s+/', self::normalizePhrase($term), -1, PREG_SPLIT_NO_EMPTY),
+        fn($w) => mb_strlen($w) >= 2
+    ));
+
+    // Kalau dua-duanya kosong, langsung pulang
+    if (empty($tokens) && empty($rawWords)) return [];
+
+    $take = max($limit * 5, 40);
+
+    // === A) FULLTEXT judul dengan token NLP ===
+    $pool = collect();
+    if (!empty($tokens)) {
+        $bool  = collect($tokens)->map(fn($t)=>$t.'*')->implode(' ');
+        $phrase= self::normalizePhrase($term);
+        if (\Illuminate\Support\Str::length($phrase) >= 5) $bool .= ' "'.$phrase.'"';
+
+        $pool = static::select('id','issue_name')
+            ->selectRaw("MATCH(issue_name) AGAINST (? IN BOOLEAN MODE) AS ft_score", [$bool])
+            ->whereRaw("MATCH(issue_name) AGAINST (? IN BOOLEAN MODE)", [$bool])
+            ->orderByDesc('ft_score')
+            ->limit($take)
+            ->get();
+    }
+
+    // === B) LIKE judul dengan token NLP (kalau FT kosong) ===
+    if ($pool->isEmpty() && !empty($tokens)) {
+        $q = static::query()->select('id','issue_name');
+        foreach ($tokens as $t) $q->orWhere('issue_name','like',"%{$t}%");
+        $pool = $q->limit($take)->get();
+        // beri skor sederhana
+        $pool->each(function($r) use ($tokens){
+            $s = 0; foreach ($tokens as $t) $s += substr_count(mb_strtolower($r->issue_name), $t);
+            $r->ft_score = $s;
+        });
+    }
+
+    // === C) LIKE judul dengan RAW WORDS user (tanpa NLP) ===
+    if ($pool->isEmpty() && !empty($rawWords)) {
+        $q = static::query()->select('id','issue_name');
+        foreach ($rawWords as $w) $q->orWhere('issue_name','like',"%{$w}%");
+        $pool = $q->limit($take)->get();
+        $lw = array_map('mb_strtolower', $rawWords);
+        $pool->each(function($r) use ($lw){
+            $s = 0; foreach ($lw as $w) $s += substr_count(mb_strtolower($r->issue_name), $w);
+            $r->ft_score = $s;
+        });
+    }
+
+    // === D) Kalau masih kosong → fallback “apa adanya” supaya UI selalu ada pilihan
+    if ($pool->isEmpty()) {
+        return static::orderByDesc('id')->limit($limit)->pluck('issue_name')->all();
+    }
+
+    // Re-score: kuatkan kemiripan judul ↔ query (pakai token NLP kalau ada; kalau tidak, pakai rawWords)
+    $qTokens = !empty($tokens) ? $tokens : $rawWords;
+    $bigrams = self::bigrams($term);
+
+    $rescored = $pool->map(function($row) use($qTokens,$bigrams){
+        $titleTok = \App\Support\Nlp::tokens($row->issue_name ?? '');
+        $inter = count(array_intersect($qTokens, $titleTok));
+        $union = count(array_unique(array_merge($qTokens, $titleTok))) ?: 1;
+        $jacc  = $inter / $union;
+
+        $ps = 0.0;
+        $titleLC = mb_strtolower($row->issue_name ?? '');
+        if ($bigrams) {
+            $hit=0; foreach($bigrams as $bg) if (str_contains($titleLC,$bg)) $hit++;
+            $ps = $hit / count($bigrams);
+        }
+
+        $ft = (float)($row->ft_score ?? 0);
+        $score = 0.55*($ft>0?1:0) + 0.30*$jacc + 0.15*$ps;
+        $row->score = $score;
+        return $row;
+    })->sortByDesc('score')->values();
+
+    return $rescored->pluck('issue_name')->unique()->take($limit)->values()->all();
+}
+
+
+
     protected static function stdDev(array $xs, float $mean): float
     {
         $n = count($xs);

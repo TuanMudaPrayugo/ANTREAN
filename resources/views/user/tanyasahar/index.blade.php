@@ -94,6 +94,42 @@ function buildSuggestionButtons(titles){
 }
 function disableFeedback(fbEl){ if (fbEl) fbEl.style.display='none'; }
 
+//filter untk normalisai
+function normalizeKey(s){
+  return (s || '')
+    .toLowerCase()
+    .replace(/[-_]/g, ' ')
+    .replace(/[^a-z0-9 ]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function uniqueTitles(titles){
+  const seen = new Set(), out = [];
+  (titles || []).forEach(t=>{
+    const k = normalizeKey(t);
+    if (!k || seen.has(k)) return;
+    seen.add(k); out.push(t);
+  });
+  return out;
+}
+function filterAltTitles(rawTitles, title, userQuery){
+  const ban = new Set([ normalizeKey(title), normalizeKey(userQuery) ]);
+  const filtered = uniqueTitles(rawTitles).filter(t => !ban.has(normalizeKey(t)));
+  return filtered;
+}
+function buildSuggestionButtons(titles){
+  const wrap = document.createElement('div');
+  wrap.className = 'alternatives';
+  titles.forEach(judul=>{
+    const b = document.createElement('button');
+    b.className = 'alt-btn';
+    b.textContent = judul;
+    b.addEventListener('click', ()=>{ qEl.value = judul; sendBtn.click(); });
+    wrap.appendChild(b);
+  });
+  return wrap;
+}
+function disableFeedback(el){ if (el) el.style.display='none'; }
 
 function addUserBubble(text){
   const div = document.createElement('div');
@@ -153,6 +189,9 @@ function removeTypingBubble(){
 function addAnswerBubble(payload){
   const { title, answer, issue_id, alternatives, ask_feedback } = payload;
 
+  // 🔴 1) Hapus semua feedback lama (supaya hanya jawaban terbaru yang punya tombol)
+  chatEl.querySelectorAll('.feedback').forEach(node => node.remove());
+
   const box = document.createElement('div');
   box.className = 'bubble';
 
@@ -164,31 +203,36 @@ function addAnswerBubble(payload){
   }
 
   const a = document.createElement('div');
-  const hasAnswer = !!(answer && answer.trim() !== '');
-  a.innerHTML = hasAnswer
+  a.innerHTML = (answer && answer.trim() !== '')
     ? nl2br(escapeHtml(answer.trim()))
-    : '<span class="muted">Belum ada hasil yang pas. Coba pilih pertanyaan terkait di bawah.</span>';
+    : '<span class="muted">Belum ada hasil yang cocok.</span>';
   box.appendChild(a);
 
-  // simpan state mentah dari server (jangan difilter di sini)
+  // simpan state untuk feedback
   lastState.issue_id = issue_id || null;
   lastState.alternatives = Array.isArray(alternatives) ? alternatives : [];
 
-  // tampilkan saran ringan (boleh difilter sedikit untuk tampilan awal)
-  let altShow = uniqueTitles(lastState.alternatives).slice(0, 5);
-  if (altShow.length > 0) {
-    const head = document.createElement('div');
-    head.className = 'muted';
-    head.style.marginTop = '8px';
-    head.textContent = hasAnswer ? 'Pertanyaan terkait:' : 'Coba pertanyaan berikut:';
-    box.appendChild(head);
-    box.appendChild(buildSuggestionButtons(altShow));
+  // alternatives (saran) dari API
+  if (lastState.alternatives.length > 0) {
+    const altWrap = document.createElement('div');
+    altWrap.className = 'alternatives';
+    lastState.alternatives.slice(0, 5).forEach(judul => {
+      const b = document.createElement('button');
+      b.className = 'alt-btn';
+      b.textContent = judul;
+      b.addEventListener('click', ()=> {
+        qEl.value = judul;
+        sendBtn.click();
+      });
+      altWrap.appendChild(b);
+    });
+    box.appendChild(altWrap);
   }
 
+  // feedback (hanya untuk jawaban TERBARU)
   if (ask_feedback) {
     const fb = document.createElement('div');
     fb.className = 'feedback';
-
     const label = document.createElement('span');
     label.className = 'muted';
     label.textContent = 'Apakah jawaban ini membantu?';
@@ -197,14 +241,15 @@ function addAnswerBubble(payload){
     const y = document.createElement('button');
     y.className = 'btn btn-yes';
     y.textContent = 'Ya';
-    y.addEventListener('click', ()=>{ disableFeedback(fb); sendFeedback(true); });
+    // 🔴 2) Hilangkan feedback ini begitu diklik, lalu kirim feedback
+    y.addEventListener('click', ()=> { fb.remove(); sendFeedback(true); });
     fb.appendChild(y);
 
     const n = document.createElement('button');
     n.className = 'btn btn-no';
     n.textContent = 'Tidak';
-    // PENTING: saat Tidak, kita kirim alternatif MENTAH (tanpa filter ketat)
-    n.addEventListener('click', ()=>{ disableFeedback(fb); sendFeedback(false); });
+    // 🔴 2) Sama: hapus feedback & kirim
+    n.addEventListener('click', ()=> { fb.remove(); sendFeedback(false); });
     fb.appendChild(n);
 
     box.appendChild(fb);
@@ -226,7 +271,9 @@ function sendFeedback(isHelpful){
       is_helpful: !!isHelpful,
       alternatives: lastState.alternatives
     })
-  }).then(()=> {
+  })
+  .then(r => r.json())
+  .then(res => {
     const note = document.createElement('div');
     note.className = 'bubble';
 
@@ -234,30 +281,31 @@ function sendFeedback(isHelpful){
       note.innerHTML = '<span class="muted">Terima kasih atas tanggapannya.</span>';
       chatEl.appendChild(note);
     } else {
-      // gunakan alternatives mentah dari server — TANPA filter ketat agar selalu ada
-      const raw = Array.isArray(lastState.alternatives) ? lastState.alternatives : [];
-      const picked = uniqueTitles(raw).slice(0, 5);
-
-      const head = document.createElement('div');
-      head.className = 'title';
-      head.textContent = 'Mungkin yang Anda maksud:';
-      note.appendChild(head);
-
-      if (picked.length > 0) {
-        note.appendChild(buildSuggestionButtons(picked));
+      if (res.alternatives && res.alternatives.length > 0) {
+        note.innerHTML = '<div class="title">Mungkin yang Anda maksud:</div>';
+        const wrap = document.createElement('div');
+        wrap.className = 'alternatives';
+        res.alternatives.slice(0,5).forEach(judul=>{
+          const b = document.createElement('button');
+          b.className = 'alt-btn';
+          b.textContent = judul;
+          b.addEventListener('click', ()=>{ qEl.value = judul; sendBtn.click(); });
+          wrap.appendChild(b);
+        });
+        note.appendChild(wrap);
+        chatEl.appendChild(note);
       } else {
-        // benar-benar tidak ada dari server → fallback teks
-        const empty = document.createElement('div');
-        empty.className = 'muted';
-        empty.textContent = 'Coba ketik ulang dengan kata kunci yang lebih spesifik.';
-        note.appendChild(empty);
+        note.innerHTML = '<span class="muted">Terima kasih, masukan Anda sudah tersimpan.</span>';
+        chatEl.appendChild(note);
       }
-      chatEl.appendChild(note);
     }
 
     chatEl.scrollTop = chatEl.scrollHeight;
-  }).catch(()=>{/* no-op */});
+  })
+  .catch(()=>{/* no-op */});
 }
+
+
 
 
 function ask(q){
