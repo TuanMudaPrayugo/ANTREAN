@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\KStep;
 use App\Models\KIssue;
+use App\Models\KonfirmasiPetugas;
 use App\Models\Progress;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -22,7 +23,8 @@ class KonfirmasiPetugasController extends Controller
         $stopped = Progress::with(['ticket.layanan','step','issues','issue'])
             ->where('status', Progress::STATUS_STOPPED)
             ->orderByDesc('updated_at')
-            ->get();
+            ->paginate(5,['*'],'stopped_page')
+            ->withQueryString();
 
         return view('petugas.index', [
             'title' => 'Data List Antrean',
@@ -30,6 +32,9 @@ class KonfirmasiPetugasController extends Controller
             'activeTab' => 'petugas',
             'running' => $running,
             'stopped' => $stopped,
+            'KonfirmasiPetugas' => KonfirmasiPetugas::orderBy('issue_name','asc')
+            ->paginate(5, ['*'], 'issues_page') // ✅ beda nama param
+            ->withQueryString(),
         ]);
     }
 
