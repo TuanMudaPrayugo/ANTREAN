@@ -1,4 +1,4 @@
-@extends('layout/app')
+@extends('layoutuser/app')
 
 @section('main_content')
 <div class="container min-vh-100 d-flex justify-content-center align-items-start pt-5">
