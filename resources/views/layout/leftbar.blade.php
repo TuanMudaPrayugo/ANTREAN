@@ -3,7 +3,7 @@
             <div class="main-icon-menu">
                 <a href="index.html" class="logo logo-metrica d-block text-center">
                     <span>
-                        <img src="{{asset('metrica/dist/assets/images/logo-sm.png')}}" alt="logo-small" class="logo-sm">
+                        <img src="{{asset('metrica/dist/assets/images/logo-sahar-sm.png')}}" alt="logo-large" class="logo-sm" style="height:50px; width:auto;">
                     </span>
                 </a>
                 <div class="main-icon-menu-body">
@@ -38,11 +38,11 @@
                         </ul><!--end nav-->
                     </div><!--end /div-->
                 </div><!--end main-icon-menu-body-->
-                <div class="pro-metrica-end">
+                {{-- <div class="pro-metrica-end">
                     <a href="" class="profile">
                         <img src="{{asset('metrica/dist/assets/images/users/user-4.jpg')}}" alt="profile-user" class="rounded-circle thumb-sm">
                     </a>
-                </div><!--end pro-metrica-end-->
+                </div><!--end pro-metrica-end--> --}}
             </div>
             <!--end main-icon-menu-->
 
@@ -51,8 +51,8 @@
                 <div class="topbar-left">
                     <a href="index.html" class="logo">
                         <span>
-                            <img src="{{asset('metrica/dist/assets/images/logo-dark.png')}}" alt="logo-large" class="logo-lg logo-dark">
-                            <img src="{{asset('metrica/dist/assets/images/logo.png')}}" alt="logo-large" class="logo-lg logo-light">
+                            <img src="{{asset('metrica/dist/assets/images/logo_si_sahar_small.png')}}" alt="logo-large" class="logo-lg logo-dark" style="height:30px; width:auto;">
+                            <img src="{{asset('metrica/dist/assets/images/logo_si_sahar_small')}}" alt="logo-large" class="logo-lg logo-light" style="height:30px; width:auto;">
                         </span>
                     </a><!--end logo-->
                 </div><!--end topbar-left-->
@@ -114,10 +114,8 @@
                             <h6 class="menu-title">Master Setting</h6>
                         </div>
                         <ul class="nav flex-column">
-                            <li class="nav-item">
-                                <a class="nav-link" href="pages-profile.html">Pengaturan Umum</a>
-                            </li><!--end nav-item-->
-                            <li class="nav-item {{$menuDashboard ?? ''}}">
+                            
+                            <li class="nav-item {{$menuKLayanan ?? ''}}">
                                 <a class="nav-link" href="{{route('KLayanan')}}">Kelola Layanan</a>
                             </li><!--end nav-item-->
                             <li class="nav-item">
@@ -129,9 +127,7 @@
                             <li class="nav-item">
                                 <a class="nav-link" href="{{route('SyaratDokumen')}}">Syarat Dokumen</a>
                             </li><!--end nav-item-->
-                            <li class="nav-item">
-                                <a class="nav-link" href="pages-pricing.html">AI/ML Setting</a>
-                            </li><!--end nav-item-->
+                            
                             
                         </ul><!--end nav-->
                     </div><!-- end Pages -->

@@ -13,7 +13,7 @@
 
 
                 <!-- App favicon -->
-                <link rel="shortcut icon" href="{{asset('metrica/dist/assets/images/favicon.ico')}}">
+                <link rel="shortcut icon" href="{{asset('metrica/dist/assets/images/sahar.png')}}">
 
        <!-- Sweet Alert -->
         <link href="{{asset('metrica/dist/assets/libs/sweetalert2/sweetalert2.min.css')}}" rel="stylesheet" type="text/css">

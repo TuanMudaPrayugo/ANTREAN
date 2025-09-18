@@ -3,7 +3,7 @@
             <div class="main-icon-menu">
                 <a href="index.html" class="logo logo-metrica d-block text-center">
                     <span>
-                        <img src="{{asset('metrica/dist/assets/images/logo-sm.png')}}" alt="logo-small" class="logo-sm">
+                        <img src="{{asset('metrica/dist/assets/images/logo-sahar-sm.png')}}" alt="logo-large" class="logo-sm" style="height:50px; width:auto;">
                     </span>
                 </a>
                 <div class="main-icon-menu-body">
@@ -51,8 +51,8 @@
                 <div class="topbar-left">
                     <a href="index.html" class="logo">
                         <span>
-                            <img src="{{asset('metrica/dist/assets/images/logo-dark.png')}}" alt="logo-large" class="logo-lg logo-dark">
-                            <img src="{{asset('metrica/dist/assets/images/logo.png')}}" alt="logo-large" class="logo-lg logo-light">
+                            <img src="{{asset('metrica/dist/assets/images/logo_si_sahar_small.png')}}" alt="logo-large" class="logo-lg logo-dark" style="height:30px; width:auto;">
+                            <img src="{{asset('metrica/dist/assets/images/logo_si_sahar_small.png')}}" alt="logo-large" class="logo-lg logo-light" style="height:30px; width:auto;">
                         </span>
                     </a><!--end logo-->
                 </div><!--end topbar-left-->
