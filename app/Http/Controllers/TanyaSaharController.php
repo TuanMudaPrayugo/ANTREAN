@@ -102,6 +102,14 @@ class TanyaSaharController extends Controller
 
                     if ($confident) {
                         $nice = $llm->polish($q, (string) ($best['answer'] ?? '')) ?: (string) ($best['answer'] ?? '');
+                        
+                        // ⬅️ auto-learn alias (jika id valid)
+                        if (!empty($best['id'])) {
+                            if ($issue = \App\Models\KIssue::find((int)$best['id'])) {
+                                $this->maybeLearnAlias($issue, $q);
+                            }
+                        }
+
                         return [
                             'title'        => (string) $best['title'],
                             'answer'       => $nice !== '' ? $nice : 'Maaf, belum ada jawaban.',
