@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-
 use Illuminate\Support\Facades\Log;
 use App\Support\Nlp;
 use Illuminate\Support\Str;
@@ -13,28 +12,28 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class KIssue extends Model
 {
-
-
-
     protected $table = 'kissues';
 
     protected $fillable = [
         'layanan_id',
-        'steplayanan_id', // FK ke k_steps
+        'steplayanan_id',
         'issue_name',
-        'solusion',       // jika kolomnya 'solusion' tulis ini; kalau 'solution' -> ganti 'solution'
+        'solusion',
         'std_solution_time',
-        'issue_name_norm','issue_tokens','aliases_norm',
+        'issue_name_norm', 'issue_tokens', 'aliases_norm',
     ];
 
+    protected $casts = [
+        'issue_tokens' => 'array',
+        'aliases_norm' => 'array',
+    ];
 
-     
+    /* ===== Cache helpers untuk NLP ===== */
     public static function clearNlpCaches(): void
     {
         Cache::forget('nlp_vocab_kissues');
         Cache::forget('nlp_df_kissues');
         Cache::forget('nlp_intent_lex');
-
     }
 
     protected static function booted(): void
@@ -43,15 +42,19 @@ class KIssue extends Model
         static::updated(fn () => self::clearNlpCaches());
         static::deleted(fn () => self::clearNlpCaches());
 
-        // daftarkan event ini hanya kalau model pakai SoftDeletes
+        // bila pakai soft deletes
         if (in_array(SoftDeletes::class, class_uses_recursive(self::class), true)) {
             static::restored(fn () => self::clearNlpCaches());
             static::forceDeleted(fn () => self::clearNlpCaches());
         }
+
+        // re-index embedding tiap kali data berubah
+        static::saved(function ($r) {
+            dispatch(new \App\Jobs\ReindexKIssue($r->id));
+        });
     }
-    
-    
-    
+
+    /* ===== Relasi ===== */
     public function layanan()
     {
         return $this->belongsTo(KLayanan::class, 'layanan_id', 'id');
@@ -59,7 +62,6 @@ class KIssue extends Model
 
     public function step()
     {
-        // kolom FK di kissues adalah 'steplayanan_id'
         return $this->belongsTo(KStep::class, 'steplayanan_id', 'id');
     }
 
@@ -68,12 +70,7 @@ class KIssue extends Model
         return $this->belongsTo(KategoriIssue::class, 'categoryissue_id', 'id');
     }
 
-    protected $casts = [
-        'issue_tokens' => 'array',
-        'aliases_norm' => 'array',
-    ];
-
-    /* ========== Normalisasi umum (tanpa hardcode) ========== */
+    /* ===== Normalisasi ===== */
     public static function normalizePhrase(string $q): string
     {
         $q = Str::lower($q);
@@ -88,7 +85,8 @@ class KIssue extends Model
     {
         $this->issue_name_norm = self::normalizePhrase($this->issue_name ?? '');
         $toks = Nlp::tokens(($this->issue_name ?? '') . ' ' . ($this->solusion ?? ''));
-        $toks = array_values(array_unique($toks)); sort($toks);
+        $toks = array_values(array_unique($toks));
+        sort($toks);
         $this->issue_tokens = $toks;
         if ($this->aliases_norm === null) $this->aliases_norm = [];
     }
@@ -106,8 +104,8 @@ class KIssue extends Model
 
         // boolean query
         $bool = collect(array_unique(array_merge($tokens, $expTok)))
-                ->map(fn($t) => $t . '*')
-                ->implode(' ');
+            ->map(fn ($t) => $t . '*')
+            ->implode(' ');
 
         $phrase = self::normalizePhrase($term);
         if (Str::length($phrase) >= 5) $bool .= ' "' . $phrase . '"';
@@ -116,7 +114,7 @@ class KIssue extends Model
             foreach ($intent['troubleLex'] as $neg) $bool .= ' -' . $neg . '*';
         }
 
-        $pool = static::select('id','issue_name','solusion')
+        $pool = static::select('id', 'issue_name', 'solusion')
             ->selectRaw("MATCH(issue_name, solusion) AGAINST (? IN BOOLEAN MODE) AS ft_score", [$bool])
             ->whereRaw("MATCH(issue_name, solusion) AGAINST (? IN BOOLEAN MODE)", [$bool])
             ->orderByDesc('ft_score')
@@ -129,23 +127,23 @@ class KIssue extends Model
         }
 
         // bobot adaptif
-        $ft   = $pool->pluck('ft_score')->map(fn($x)=>(float)$x)->all();
+        $ft   = $pool->pluck('ft_score')->map(fn ($x) => (float) $x)->all();
         $mean = array_sum($ft) / max(count($ft), 1);
         $std  = self::stdDev($ft, $mean);
         $cv   = $mean > 0 ? $std / max($mean, 1e-9) : 0.0;
 
         $m   = count($tokens);
         $wFT = max(0.35, min(0.75, 0.5 + 0.25 * tanh($cv)));
-        $wP  = max(0.18, min(0.35, 0.20 + max(0, 3 - $m)/3 * 0.15));
+        $wP  = max(0.18, min(0.35, 0.20 + max(0, 3 - $m) / 3 * 0.15));
         $wJ  = max(0.10, 1 - $wFT - $wP);
-        $norm= max($pool->max('ft_score') ?: 0, 1e-9);
+        $norm = max($pool->max('ft_score') ?: 0, 1e-9);
 
-        $qTokens = $tokens;
-        $bigrams = self::bigrams($term);
+        $qTokens   = $tokens;
+        $bigrams   = self::bigrams($term);
         $howtoLex   = $intent['howtoLex'];
         $troubleLex = $intent['troubleLex'];
 
-        $rescored = $pool->map(function ($row) use ($needle,$qTokens,$bigrams,$wFT,$wP,$wJ,$norm,$howtoLex,$troubleLex,$intent) {
+        $rescored = $pool->map(function ($row) use ($needle, $qTokens, $bigrams, $wFT, $wP, $wJ, $norm, $howtoLex, $troubleLex, $intent) {
             $title = Str::lower($row->issue_name ?? '');
             $hay   = Str::lower(($row->issue_name ?? '') . ' ' . ($row->solusion ?? ''));
             $rowTokens = Nlp::tokens($hay);
@@ -157,17 +155,18 @@ class KIssue extends Model
             $ps = 0.0;
             if ($needle && Str::contains($hay, $needle)) $ps = 1.0;
             elseif ($bigrams) {
-                $hit = 0; foreach ($bigrams as $bg) if (Str::contains($hay, $bg)) $hit++;
+                $hit = 0;
+                foreach ($bigrams as $bg) if (Str::contains($hay, $bg)) $hit++;
                 $ps = $hit / count($bigrams);
             } elseif ($qTokens) {
                 $ps = $inter ? min(1.0, $inter / max(2, count($qTokens))) : 0.0;
             }
 
-            $ftNorm = ($row->ft_score ?? 0) / $norm;
-            $score  = $wFT * $ftNorm + $wP * $ps + $wJ * $jacc;
+            $ftNorm   = ($row->ft_score ?? 0) / $norm;
+            $score    = $wFT * $ftNorm + $wP * $ps + $wJ * $jacc;
 
-            $hasHowto   = collect($howtoLex)->first(fn($w)=> Str::contains($title.' '.$hay, $w)) !== null;
-            $hasTrouble = collect($troubleLex)->first(fn($w)=> Str::contains($title.' '.$hay, $w)) !== null;
+            $hasHowto   = collect($howtoLex)->first(fn ($w) => Str::contains($title . ' ' . $hay, $w)) !== null;
+            $hasTrouble = collect($troubleLex)->first(fn ($w) => Str::contains($title . ' ' . $hay, $w)) !== null;
 
             if ($intent['isPay'] && !$intent['isTrouble']) {
                 if ($hasTrouble) $score -= 0.14;
@@ -176,14 +175,14 @@ class KIssue extends Model
                 if ($hasTrouble) $score += 0.08;
             }
 
-            // 🔼 Boost: token query muncul di JUDUL
+            // Boost: token query di judul
             $titleBoost = 0.0;
             foreach ($qTokens as $qt) {
                 if (Str::contains($title, $qt)) $titleBoost += 0.04;
             }
             $score += min($titleBoost, 0.12);
 
-            // 🔻 Penalti: judul memperkenalkan token spesifik (DF rendah) yang tak ada di query
+            // Penalti: judul memperkenalkan token spesifik (DF rendah) yang tidak ada di query
             $df = Nlp::df();
             $titleToks = Nlp::tokens($title);
             $cand = [];
@@ -211,100 +210,102 @@ class KIssue extends Model
         return $out;
     }
 
+    /*** ========= FIX PENTING di sini (pakai MATCH(issue_name, solusion)) ========= ***/
     public static function similarQuestions(string $term, int $limit = 8): array
-{
-    // 1) Token NLP (untuk kasus normal)
-    $tokens = \App\Support\Nlp::tokens($term);
+    {
+        // 1) Token NLP (untuk kasus normal)
+        $tokens = \App\Support\Nlp::tokens($term);
 
-    // 2) Raw words (fallback untuk typo/istilah baru)
-    $rawWords = array_values(array_filter(
-        preg_split('/\s+/', self::normalizePhrase($term), -1, PREG_SPLIT_NO_EMPTY),
-        fn($w) => mb_strlen($w) >= 2
-    ));
+        // 2) Raw words (fallback untuk typo/istilah baru)
+        $rawWords = array_values(array_filter(
+            preg_split('/\s+/', self::normalizePhrase($term), -1, PREG_SPLIT_NO_EMPTY),
+            fn ($w) => mb_strlen($w) >= 2
+        ));
 
-    // Kalau dua-duanya kosong, langsung pulang
-    if (empty($tokens) && empty($rawWords)) return [];
+        if (empty($tokens) && empty($rawWords)) return [];
 
-    $take = max($limit * 5, 40);
+        $take = max($limit * 5, 40);
 
-    // === A) FULLTEXT judul dengan token NLP ===
-    $pool = collect();
-    if (!empty($tokens)) {
-        $bool  = collect($tokens)->map(fn($t)=>$t.'*')->implode(' ');
-        $phrase= self::normalizePhrase($term);
-        if (\Illuminate\Support\Str::length($phrase) >= 5) $bool .= ' "'.$phrase.'"';
+        // === A) FULLTEXT judul+jawaban (harus sama dengan index) ===
+        $pool = collect();
+        if (!empty($tokens)) {
+            $bool   = collect($tokens)->map(fn ($t) => $t . '*')->implode(' ');
+            $phrase = self::normalizePhrase($term);
+            if (\Illuminate\Support\Str::length($phrase) >= 5) $bool .= ' "' . $phrase . '"';
 
-        $pool = static::select('id','issue_name')
-            ->selectRaw("MATCH(issue_name) AGAINST (? IN BOOLEAN MODE) AS ft_score", [$bool])
-            ->whereRaw("MATCH(issue_name) AGAINST (? IN BOOLEAN MODE)", [$bool])
-            ->orderByDesc('ft_score')
-            ->limit($take)
-            ->get();
-    }
-
-    // === B) LIKE judul dengan token NLP (kalau FT kosong) ===
-    if ($pool->isEmpty() && !empty($tokens)) {
-        $q = static::query()->select('id','issue_name');
-        foreach ($tokens as $t) $q->orWhere('issue_name','like',"%{$t}%");
-        $pool = $q->limit($take)->get();
-        // beri skor sederhana
-        $pool->each(function($r) use ($tokens){
-            $s = 0; foreach ($tokens as $t) $s += substr_count(mb_strtolower($r->issue_name), $t);
-            $r->ft_score = $s;
-        });
-    }
-
-    // === C) LIKE judul dengan RAW WORDS user (tanpa NLP) ===
-    if ($pool->isEmpty() && !empty($rawWords)) {
-        $q = static::query()->select('id','issue_name');
-        foreach ($rawWords as $w) $q->orWhere('issue_name','like',"%{$w}%");
-        $pool = $q->limit($take)->get();
-        $lw = array_map('mb_strtolower', $rawWords);
-        $pool->each(function($r) use ($lw){
-            $s = 0; foreach ($lw as $w) $s += substr_count(mb_strtolower($r->issue_name), $w);
-            $r->ft_score = $s;
-        });
-    }
-
-    // === D) Kalau masih kosong → fallback “apa adanya” supaya UI selalu ada pilihan
-    if ($pool->isEmpty()) {
-        return static::orderByDesc('id')->limit($limit)->pluck('issue_name')->all();
-    }
-
-    // Re-score: kuatkan kemiripan judul ↔ query (pakai token NLP kalau ada; kalau tidak, pakai rawWords)
-    $qTokens = !empty($tokens) ? $tokens : $rawWords;
-    $bigrams = self::bigrams($term);
-
-    $rescored = $pool->map(function($row) use($qTokens,$bigrams){
-        $titleTok = \App\Support\Nlp::tokens($row->issue_name ?? '');
-        $inter = count(array_intersect($qTokens, $titleTok));
-        $union = count(array_unique(array_merge($qTokens, $titleTok))) ?: 1;
-        $jacc  = $inter / $union;
-
-        $ps = 0.0;
-        $titleLC = mb_strtolower($row->issue_name ?? '');
-        if ($bigrams) {
-            $hit=0; foreach($bigrams as $bg) if (str_contains($titleLC,$bg)) $hit++;
-            $ps = $hit / count($bigrams);
+            $pool = static::select('id', 'issue_name')
+                ->selectRaw("MATCH(issue_name, solusion) AGAINST (? IN BOOLEAN MODE) AS ft_score", [$bool])
+                ->whereRaw("MATCH(issue_name, solusion) AGAINST (? IN BOOLEAN MODE)", [$bool])
+                ->orderByDesc('ft_score')
+                ->limit($take)
+                ->get();
         }
 
-        $ft = (float)($row->ft_score ?? 0);
-        $score = 0.55*($ft>0?1:0) + 0.30*$jacc + 0.15*$ps;
-        $row->score = $score;
-        return $row;
-    })->sortByDesc('score')->values();
+        // === B) LIKE judul dengan token NLP (kalau FT kosong) ===
+        if ($pool->isEmpty() && !empty($tokens)) {
+            $q = static::query()->select('id', 'issue_name');
+            foreach ($tokens as $t) $q->orWhere('issue_name', 'like', "%{$t}%");
+            $pool = $q->limit($take)->get();
+            $pool->each(function ($r) use ($tokens) {
+                $s = 0;
+                foreach ($tokens as $t) $s += substr_count(mb_strtolower($r->issue_name), $t);
+                $r->ft_score = $s;
+            });
+        }
 
-    return $rescored->pluck('issue_name')->unique()->take($limit)->values()->all();
-}
+        // === C) LIKE judul dengan RAW WORDS user (tanpa NLP) ===
+        if ($pool->isEmpty() && !empty($rawWords)) {
+            $q = static::query()->select('id', 'issue_name');
+            foreach ($rawWords as $w) $q->orWhere('issue_name', 'like', "%{$w}%");
+            $pool = $q->limit($take)->get();
+            $lw = array_map('mb_strtolower', $rawWords);
+            $pool->each(function ($r) use ($lw) {
+                $s = 0;
+                foreach ($lw as $w) $s += substr_count(mb_strtolower($r->issue_name), $w);
+                $r->ft_score = $s;
+            });
+        }
 
+        // === D) Fallback “apa adanya” supaya UI selalu ada pilihan
+        if ($pool->isEmpty()) {
+            return static::orderByDesc('id')->limit($limit)->pluck('issue_name')->all();
+        }
 
+        // Re-score: kuatkan kemiripan judul ↔ query
+        $qTokens = !empty($tokens) ? $tokens : $rawWords;
+        $bigrams = self::bigrams($term);
+
+        $rescored = $pool->map(function ($row) use ($qTokens, $bigrams) {
+            $titleTok = \App\Support\Nlp::tokens($row->issue_name ?? '');
+            $inter = count(array_intersect($qTokens, $titleTok));
+            $union = count(array_unique(array_merge($qTokens, $titleTok))) ?: 1;
+            $jacc  = $inter / $union;
+
+            $ps = 0.0;
+            $titleLC = mb_strtolower($row->issue_name ?? '');
+            if ($bigrams) {
+                $hit = 0;
+                foreach ($bigrams as $bg) if (str_contains($titleLC, $bg)) $hit++;
+                $ps = $hit / count($bigrams);
+            }
+
+            $ft = (float) ($row->ft_score ?? 0);
+            $score = 0.55 * ($ft > 0 ? 1 : 0) + 0.30 * $jacc + 0.15 * $ps;
+            $row->score = $score;
+            return $row;
+        })->sortByDesc('score')->values();
+
+        return $rescored->pluck('issue_name')->unique()->take($limit)->values()->all();
+    }
 
     protected static function stdDev(array $xs, float $mean): float
     {
         $n = count($xs);
         if ($n <= 1) return 0.0;
         $acc = 0.0;
-        foreach ($xs as $x) { $d = $x - $mean; $acc += $d * $d; }
+        foreach ($xs as $x) {
+            $d = $x - $mean; $acc += $d * $d;
+        }
         return sqrt($acc / ($n - 1));
     }
 
@@ -313,7 +314,7 @@ class KIssue extends Model
         $tokens = Nlp::tokens($term);
         if (empty($tokens)) $tokens = [Str::lower(trim($term))];
 
-        $q = static::query()->select(['id','issue_name','solusion']);
+        $q = static::query()->select(['id', 'issue_name', 'solusion']);
 
         $q->where(function ($qq) use ($tokens) {
             foreach ($tokens as $t) {
@@ -343,10 +344,20 @@ class KIssue extends Model
     }
 
     public function progresses()
-{
-    return $this->belongsToMany(\App\Models\Progress::class, 'progress_issue', 'issue_id', 'progress_id')
-                ->withTimestamps();
-}
+    {
+        return $this->belongsToMany(\App\Models\Progress::class, 'progress_issue', 'issue_id', 'progress_id')
+            ->withTimestamps();
+    }
+    public function appendAlias(string $aliasNorm): void
+    {
+        $aliasNorm = trim($aliasNorm);
+        if ($aliasNorm === '') return;
 
-
+        $arr = is_array($this->aliases_norm) ? $this->aliases_norm : [];
+        if (!in_array($aliasNorm, $arr, true)) {
+            $arr[] = $aliasNorm;
+            $this->aliases_norm = array_values(array_unique($arr));
+            $this->save();
+        }
+    }
 }

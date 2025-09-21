@@ -13,7 +13,7 @@ class LlmService
     public function polish(string $question, string $rawAnswer): string
     {
         // OFF switch
-        if (!filter_var(env('USE_LLM', true), FILTER_VALIDATE_BOOL)) {
+        if (!filter_var(env('USE_LLM', false), FILTER_VALIDATE_BOOLEAN)) {
             return $rawAnswer;
         }
 

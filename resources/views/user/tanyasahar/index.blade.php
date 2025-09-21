@@ -60,41 +60,17 @@ const routes = {
   ask: "{{ route('TanyaSahar.ask') }}",
   feedback: "{{ route('TanyaSahar.feedback') }}"
 };
-const CSRF = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+const CSRF   = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 
-const chatEl = document.getElementById('chat');
-const qEl = document.getElementById('q');
+const chatEl  = document.getElementById('chat');
+const qEl     = document.getElementById('q');
 const sendBtn = document.getElementById('send');
 
-let lastState = { issue_id:null, alternatives:[], user_query:'' };
-let typingNode = null;
+let lastState   = { issue_id:null, alternatives:[], user_query:'' };
+let typingNode  = null;
 let typingTimer = null;
-//
-// tambahan fungsi baru untuk rekomendasi pertanyaan
-function uniqueTitles(titles){
-  const seen = new Set(), out = [];
-  (titles || []).forEach(t=>{
-    const k = (t||'').trim().toLowerCase();
-    if (!k || seen.has(k)) return;
-    seen.add(k); out.push(t);
-  });
-  return out;
-}
-function buildSuggestionButtons(titles){
-  const wrap = document.createElement('div');
-  wrap.className = 'alternatives';
-  titles.forEach(judul=>{
-    const b = document.createElement('button');
-    b.className = 'alt-btn';
-    b.textContent = judul;
-    b.addEventListener('click', ()=>{ qEl.value = judul; sendBtn.click(); });
-    wrap.appendChild(b);
-  });
-  return wrap;
-}
-function disableFeedback(fbEl){ if (fbEl) fbEl.style.display='none'; }
 
-//filter untk normalisai
+/* ========== helpers untuk alternatif ========== */
 function normalizeKey(s){
   return (s || '')
     .toLowerCase()
@@ -114,23 +90,10 @@ function uniqueTitles(titles){
 }
 function filterAltTitles(rawTitles, title, userQuery){
   const ban = new Set([ normalizeKey(title), normalizeKey(userQuery) ]);
-  const filtered = uniqueTitles(rawTitles).filter(t => !ban.has(normalizeKey(t)));
-  return filtered;
+  return uniqueTitles(rawTitles).filter(t => !ban.has(normalizeKey(t)));
 }
-function buildSuggestionButtons(titles){
-  const wrap = document.createElement('div');
-  wrap.className = 'alternatives';
-  titles.forEach(judul=>{
-    const b = document.createElement('button');
-    b.className = 'alt-btn';
-    b.textContent = judul;
-    b.addEventListener('click', ()=>{ qEl.value = judul; sendBtn.click(); });
-    wrap.appendChild(b);
-  });
-  return wrap;
-}
-function disableFeedback(el){ if (el) el.style.display='none'; }
 
+/* ========== UI helpers ========== */
 function addUserBubble(text){
   const div = document.createElement('div');
   div.className = 'bubble me';
@@ -138,38 +101,26 @@ function addUserBubble(text){
   chatEl.appendChild(div);
   chatEl.scrollTop = chatEl.scrollHeight;
 }
-
 function addTypingBubble(){
-  // jika sudah ada, jangan dobel
   removeTypingBubble();
-
   const box = document.createElement('div');
   box.className = 'bubble';
   box.dataset.typing = '1';
 
-  // header kecil
   const head = document.createElement('div');
   head.className = 'typing';
-  const lab = document.createElement('span');
-  lab.className = 'muted';
-  lab.textContent = 'Sedang mengetik';
-  const dots = document.createElement('span');
-  dots.className = 'dots';
-  dots.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
-  head.appendChild(lab); head.appendChild(dots);
+  head.innerHTML = `<span class="muted">Sedang mengetik</span>
+                    <span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>`;
   box.appendChild(head);
 
-  // shimmer placeholders (variasi panjang)
-  const sk1 = document.createElement('div'); sk1.className = 'skeleton'; sk1.style.width='82%';
-  const sk2 = document.createElement('div'); sk2.className = 'skeleton'; sk2.style.width='65%';
-  const sk3 = document.createElement('div'); sk3.className = 'skeleton'; sk3.style.width='74%';
-  box.appendChild(sk1); box.appendChild(sk2); box.appendChild(sk3);
+  ['82%','65%','74%'].forEach(w=>{
+    const sk = document.createElement('div'); sk.className='skeleton'; sk.style.width=w; box.appendChild(sk);
+  });
 
   chatEl.appendChild(box);
   chatEl.scrollTop = chatEl.scrollHeight;
   typingNode = box;
 
-  // kalau lama > 8 detik, ganti label
   clearTimeout(typingTimer);
   typingTimer = setTimeout(()=>{
     if (!typingNode) return;
@@ -177,19 +128,17 @@ function addTypingBubble(){
     if (lbl) lbl.textContent = 'Masih memproses...';
   }, 8000);
 }
-
 function removeTypingBubble(){
   clearTimeout(typingTimer);
-  if (typingNode && typingNode.parentNode){
-    typingNode.parentNode.removeChild(typingNode);
-  }
+  if (typingNode?.parentNode) typingNode.parentNode.removeChild(typingNode);
   typingNode = null;
 }
 
+/* ========== INTI: render jawaban/rekomendasi ========== */
 function addAnswerBubble(payload){
   const { title, answer, issue_id, alternatives, ask_feedback } = payload;
 
-  // 🔴 1) Hapus semua feedback lama (supaya hanya jawaban terbaru yang punya tombol)
+  // bersihkan feedback lama (hanya jawaban terbaru yang boleh punya feedback UI)
   chatEl.querySelectorAll('.feedback').forEach(node => node.remove());
 
   const box = document.createElement('div');
@@ -202,56 +151,43 @@ function addAnswerBubble(payload){
     box.appendChild(t);
   }
 
+  // 🔧 kalau answer kosong, JANGAN tulis "Belum ada hasil...".
+  // gunakan teks ajakan agar UI tidak kosong.
+  const fallbackMsg = 'Sepertinya ini yang paling mendekati. Pilih salah satu di bawah:';
+  const safeAnswer  = (answer && answer.trim() !== '') ? answer.trim() : fallbackMsg;
+
   const a = document.createElement('div');
-  a.innerHTML = (answer && answer.trim() !== '')
-    ? nl2br(escapeHtml(answer.trim()))
-    : '<span class="muted">Belum ada hasil yang cocok.</span>';
+  a.innerHTML = nl2br(escapeHtml(safeAnswer));
   box.appendChild(a);
 
   // simpan state untuk feedback
-  lastState.issue_id = issue_id || null;
+  lastState.issue_id     = issue_id ?? null;
   lastState.alternatives = Array.isArray(alternatives) ? alternatives : [];
 
-  // alternatives (saran) dari API
-  if (lastState.alternatives.length > 0) {
-    const altWrap = document.createElement('div');
-    altWrap.className = 'alternatives';
-    lastState.alternatives.slice(0, 5).forEach(judul => {
+  // tampilkan alternatif (disaring & unik)
+  const alts = filterAltTitles(lastState.alternatives, title || '', lastState.user_query || '');
+  if (alts.length > 0) {
+    const altWrap = document.createElement('div'); altWrap.className = 'alternatives';
+    alts.slice(0, 5).forEach(judul => {
       const b = document.createElement('button');
       b.className = 'alt-btn';
       b.textContent = judul;
-      b.addEventListener('click', ()=> {
-        qEl.value = judul;
-        sendBtn.click();
-      });
+      b.addEventListener('click', ()=> { qEl.value = judul; sendBtn.click(); });
       altWrap.appendChild(b);
     });
     box.appendChild(altWrap);
   }
 
-  // feedback (hanya untuk jawaban TERBARU)
+  // feedback
   if (ask_feedback) {
     const fb = document.createElement('div');
     fb.className = 'feedback';
-    const label = document.createElement('span');
-    label.className = 'muted';
-    label.textContent = 'Apakah jawaban ini membantu?';
-    fb.appendChild(label);
-
-    const y = document.createElement('button');
-    y.className = 'btn btn-yes';
-    y.textContent = 'Ya';
-    // 🔴 2) Hilangkan feedback ini begitu diklik, lalu kirim feedback
-    y.addEventListener('click', ()=> { fb.remove(); sendFeedback(true); });
-    fb.appendChild(y);
-
-    const n = document.createElement('button');
-    n.className = 'btn btn-no';
-    n.textContent = 'Tidak';
-    // 🔴 2) Sama: hapus feedback & kirim
+    fb.innerHTML = `<span class="muted">Apakah jawaban ini membantu?</span>`;
+    const y = document.createElement('button'); y.className='btn btn-yes'; y.textContent='Ya';
+    const n = document.createElement('button'); n.className='btn btn-no';  n.textContent='Tidak';
+    y.addEventListener('click', ()=> { fb.remove(); sendFeedback(true);  });
     n.addEventListener('click', ()=> { fb.remove(); sendFeedback(false); });
-    fb.appendChild(n);
-
+    fb.appendChild(y); fb.appendChild(n);
     box.appendChild(fb);
   }
 
@@ -259,16 +195,15 @@ function addAnswerBubble(payload){
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
-
 function sendFeedback(isHelpful){
   fetch(routes.feedback, {
     method: 'POST',
     headers: {'Content-Type':'application/json','X-CSRF-TOKEN': CSRF},
     body: JSON.stringify({
-      issue_id: lastState.issue_id,
-      session_id: getSessionId(),
-      user_query: lastState.user_query,
-      is_helpful: !!isHelpful,
+      issue_id:     lastState.issue_id,
+      session_id:   getSessionId(),
+      user_query:   lastState.user_query,
+      is_helpful:   !!isHelpful,
       alternatives: lastState.alternatives
     })
   })
@@ -279,48 +214,45 @@ function sendFeedback(isHelpful){
 
     if (isHelpful) {
       note.innerHTML = '<span class="muted">Terima kasih atas tanggapannya.</span>';
-      chatEl.appendChild(note);
+    } else if (res.alternatives && res.alternatives.length > 0) {
+      note.innerHTML = '<div class="title">Mungkin yang Anda maksud:</div>';
+      const wrap = document.createElement('div'); wrap.className = 'alternatives';
+      filterAltTitles(res.alternatives, '', lastState.user_query).slice(0,5).forEach(judul=>{
+        const b = document.createElement('button');
+        b.className = 'alt-btn'; b.textContent = judul;
+        b.addEventListener('click', ()=>{ qEl.value = judul; sendBtn.click(); });
+        wrap.appendChild(b);
+      });
+      note.appendChild(wrap);
     } else {
-      if (res.alternatives && res.alternatives.length > 0) {
-        note.innerHTML = '<div class="title">Mungkin yang Anda maksud:</div>';
-        const wrap = document.createElement('div');
-        wrap.className = 'alternatives';
-        res.alternatives.slice(0,5).forEach(judul=>{
-          const b = document.createElement('button');
-          b.className = 'alt-btn';
-          b.textContent = judul;
-          b.addEventListener('click', ()=>{ qEl.value = judul; sendBtn.click(); });
-          wrap.appendChild(b);
-        });
-        note.appendChild(wrap);
-        chatEl.appendChild(note);
-      } else {
-        note.innerHTML = '<span class="muted">Terima kasih, masukan Anda sudah tersimpan.</span>';
-        chatEl.appendChild(note);
-      }
+      note.innerHTML = '<span class="muted">Terima kasih, masukan Anda sudah tersimpan.</span>';
     }
 
+    chatEl.appendChild(note);
     chatEl.scrollTop = chatEl.scrollHeight;
   })
-  .catch(()=>{/* no-op */});
+  .catch(()=>{ /* diamkan saja */ });
 }
 
-
-
-
+/* ========== jaringan & event ========== */
 function ask(q){
   lastState.user_query = q;
   addUserBubble(q);
 
-  // tampilkan typing indicator
   addTypingBubble();
   sendBtn.classList.add('is-disabled');
   qEl.setAttribute('disabled', 'disabled');
 
-  // timeout jaringan: jika >30s, tutup typing & tampilkan pesan
   const networkTimeout = setTimeout(()=>{
     removeTypingBubble();
-    addAnswerBubble({ title:null, answer:'', issue_id:null, alternatives:[], ask_feedback:false });
+    // pakai fallbackMsg agar tidak ada "Belum ada hasil..."
+    addAnswerBubble({
+      title: null,
+      answer: 'Sebentar ya, jaringan lambat. Coba klik salah satu rekomendasi di bawah ini.',
+      issue_id: null,
+      alternatives: [],
+      ask_feedback: false
+    });
   }, 30000);
 
   fetch(routes.ask, {
@@ -337,7 +269,13 @@ function ask(q){
   .catch(() => {
     clearTimeout(networkTimeout);
     removeTypingBubble();
-    addAnswerBubble({ title:null, answer:'', issue_id:null, alternatives:[], ask_feedback:false });
+    addAnswerBubble({
+      title: null,
+      answer: 'Maaf, terjadi gangguan jaringan. Coba lagi ya.',
+      issue_id: null,
+      alternatives: [],
+      ask_feedback: false
+    });
   })
   .finally(()=>{
     sendBtn.classList.remove('is-disabled');
@@ -353,17 +291,17 @@ sendBtn.addEventListener('click', () => {
   qEl.value = '';
   qEl.focus();
 });
+
 qEl.addEventListener('keydown', (e)=>{
-  if (e.key === 'Enter') sendBtn.click();
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    sendBtn.click();
+  }
 });
 
 /* ==== utils ==== */
-function escapeHtml(s){
-  const div = document.createElement('div');
-  div.innerText = s;
-  return div.innerHTML;
-}
-function nl2br(s){ return s.replace(/\n/g, '<br>'); }
+function escapeHtml(s){ const d=document.createElement('div'); d.innerText=s||''; return d.innerHTML; }
+function nl2br(s){ return (s||'').replace(/\n/g, '<br>'); }
 function getSessionId(){
   const k = 'ts_session_id';
   let v = localStorage.getItem(k);
@@ -372,3 +310,4 @@ function getSessionId(){
 }
 </script>
 @endpush
+
